@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "NeuGPT",
+  "version": "1.0.0",
+  "description": "Scrape LinkedIn Jobs and Draft Emails",
+  "action": {
+    "default_title": "Open NeuGPT"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.linkedin.com/*"
+      ],
+      "js": [
+        "src/content.js"
+      ]
+    }
+  ],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel",
+    "identity"
+  ],
+  "host_permissions": [
+    "*://*.linkedin.com/*",
+    "https://neugpt-h8f5fgbjhwhpcyhb.eastasia-01.azurewebsites.net/*"
+  ]
+}
