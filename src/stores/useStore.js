@@ -45,9 +45,19 @@ export const useAuthStore = create(
        * Initiate Google OAuth login
        */
       login: async () => {
-        set({ isLoading: true });
+        set({ isLoading: true, error: null });
         try {
           authAPI.googleLogin();
+          // googleLogin uses launchWebAuthFlow which is async via callback
+          // isLoading will be reset in the callback (on success or failure)
+          // But if the user closes the popup, we need a safety reset
+          setTimeout(() => {
+            // If still loading after 3 minutes, reset (user closed popup)
+            const state = useAuthStore.getState();
+            if (state.isLoading && !state.isAuthenticated) {
+              set({ isLoading: false });
+            }
+          }, 180000);
         } catch (error) {
           set({ error: error.message, isLoading: false });
         }

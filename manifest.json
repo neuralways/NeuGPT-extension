@@ -32,6 +32,6 @@
   ],
   "host_permissions": [
     "*://*.linkedin.com/*",
-    "https://neugpt-h8f5fgbjhwhpcyhb.eastasia-01.azurewebsites.net/*"
+    "http://localhost:8000/*"
   ]
 }

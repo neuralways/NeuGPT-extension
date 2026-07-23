@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/useStore';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://neugpt-h8f5fgbjhwhpcyhb.eastasia-01.azurewebsites.net';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '1063373789837-uhmjai4ipe0adekn2166ggj0tgfsbbbl.apps.googleusercontent.com';
 
 const api = axios.create({
@@ -76,13 +76,13 @@ export const authAPI = {
           url: authUrl,
           interactive: true
         },
-        function(redirect_url) {
+        function (redirect_url) {
           if (chrome.runtime.lastError || !redirect_url) {
             console.error(chrome.runtime.lastError);
             useAuthStore.getState().logout();
             return;
           }
-          
+
           // Parse the redirect URL
           const urlParams = new URLSearchParams(new URL(redirect_url).search);
           const code = urlParams.get('code');
@@ -92,7 +92,7 @@ export const authAPI = {
             // Because the frontend router isn't handling this redirect directly,
             // we manually call the token exchange here.
             useAuthStore.setState({ isLoading: true });
-            
+
             api.post('/auth/google/frontend-token', new URLSearchParams({
               code,
               state: returnedState,
