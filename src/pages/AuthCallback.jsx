@@ -1,15 +1,20 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../stores/useStore';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { authAPI } from '../services/api';
 
 export default function AuthCallback() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { setToken } = useAuthStore();
+  // Prevent double-execution from React StrictMode (which mounts effects twice in dev)
+  const hasRun = useRef(false);
 
   useEffect(() => {
+    if (hasRun.current) return;
+    hasRun.current = true;
+
     const handleCallback = async () => {
       try {
         const code = searchParams.get('code');
@@ -74,7 +79,7 @@ export default function AuthCallback() {
     };
 
     handleCallback();
-  }, [searchParams, navigate, setToken]);
+  }, []); // Empty deps — runs once. searchParams are read inside the handler.
 
   return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">

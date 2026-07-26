@@ -83,6 +83,47 @@ const getRoleDisplay = (post) => {
   return 'General Application';
 };
 
+const normalizeKeyPart = (value) => String(value || '').trim().toLowerCase();
+
+const getPostIdentityKey = (post) => {
+  const role = normalizeKeyPart(post.Role || post.role);
+  const postLink = normalizeKeyPart(post['Post Link']);
+
+  if (postLink && postLink !== 'n/a') {
+    return `link:${postLink}||role:${role}`;
+  }
+
+  return [
+    `email:${normalizeKeyPart(post.Email)}`,
+    `author:${normalizeKeyPart(post.Author)}`,
+    `date:${normalizeKeyPart(post.Date)}`,
+    `text:${normalizeKeyPart(post['Post Text']).slice(0, 300)}`,
+    `role:${role}`,
+  ].join('||');
+};
+
+const createCsvFileFromPosts = (posts, fileName = 'scraped_jobs.csv') => {
+  const headers = ['Author', 'Post Text', 'Post Link', 'Email', 'Date', 'Company', 'Role'];
+  const csvRows = [headers.join(',')];
+
+  for (const row of posts) {
+    const values = headers.map(header => {
+      const value = row[header] ? String(row[header]).replace(/"/g, '""') : '';
+      return `"${value}"`;
+    });
+    csvRows.push(values.join(','));
+  }
+
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  return new File([blob], fileName, { type: 'text/csv' });
+};
+
+const normalizePreviewData = (payload) => ({
+  ...payload,
+  eligible_mails: Array.isArray(payload?.eligible_mails) ? payload.eligible_mails : [],
+  excluded_posts: Array.isArray(payload?.excluded_posts) ? payload.excluded_posts : [],
+});
+
 export default function LinkedInAnalyzer() {
   const [scrapedData, setScrapedData] = useState(null);
   const [drafts, setDrafts] = useState([]);
@@ -260,14 +301,20 @@ export default function LinkedInAnalyzer() {
           setError('Please navigate to LinkedIn to scrape jobs.');
           return;
         }
-        chrome.tabs.sendMessage(activeTab.id, { action: 'startScraping', speed: scrollSpeed }, (response) => {
+        chrome.tabs.sendMessage(activeTab.id, { action: 'resetData' }, () => {
           if (chrome.runtime.lastError) {
             setError('Could not connect to LinkedIn page. Please refresh the page and try again.');
             return;
           }
-          setIsScraping(true);
-          setLiveCount(0);
-          setSuccessMessage('Scraping started! Scroll will run automatically.');
+          chrome.tabs.sendMessage(activeTab.id, { action: 'startScraping', speed: scrollSpeed }, () => {
+            if (chrome.runtime.lastError) {
+              setError('Could not start scraping. Please refresh the LinkedIn page and try again.');
+              return;
+            }
+            setIsScraping(true);
+            setLiveCount(0);
+            setSuccessMessage('Scraping started! Scroll will run automatically.');
+          });
         });
       });
     } catch(e) {
@@ -283,26 +330,42 @@ export default function LinkedInAnalyzer() {
         if (!activeTab) return;
         
         chrome.tabs.sendMessage(activeTab.id, { action: 'stopScraping' }, () => {
-          chrome.tabs.sendMessage(activeTab.id, { action: 'getScrapedData' }, (response) => {
-            setIsScraping(false);
-            if (response && response.success && response.data.length > 0) {
-              setScrapedData(prev => {
-                const existing = prev || [];
-                const existingLinks = new Set(existing.map(p => p['Post Link']));
-                const newPosts = response.data.filter(p => !existingLinks.has(p['Post Link']));
-                const combined = [...existing, ...newPosts];
-                setSuccessMessage(`Added ${newPosts.length} new job posts (Total: ${combined.length})!`);
-                return combined;
-              });
-              setPreviewData(null);
-              setDrafts([]);
-            } else {
-              setError('No job posts with emails found.');
-              setLiveCount(0);
-            }
-            setLoadingAction('');
+            chrome.tabs.sendMessage(activeTab.id, { action: 'getScrapedData' }, (response) => {
+              console.log('[LinkedInAnalyzer] getScrapedData response:', response);
+              setIsScraping(false);
+              if (response && response.success && response.data && response.data.length > 0) {
+                console.log('[LinkedInAnalyzer] Received', response.data.length, 'posts from content script');
+                // Attach the current role to each newly scraped post so it can be identified later
+                const newPostsWithRole = response.data.map(p => ({
+                  ...p,
+                  Role: role.trim(),
+                }));
+
+                setScrapedData(prev => {
+                  const existing = prev || [];
+                  const existingKeys = new Set(existing.map(getPostIdentityKey));
+                  const newPosts = newPostsWithRole.filter(p => {
+                    const key = getPostIdentityKey(p);
+                    if (existingKeys.has(key)) return false;
+                    existingKeys.add(key);
+                    return true;
+                  });
+                  console.log('[LinkedInAnalyzer] New unique posts to add:', newPosts.length);
+                  const combined = [...existing, ...newPosts];
+                  setSuccessMessage(`Added ${newPosts.length} new posts with emails (Total: ${combined.length})!`);
+                  return combined;
+                });
+                setPreviewData(null);
+                setDrafts([]);
+                chrome.tabs.sendMessage(activeTab.id, { action: 'resetData' }, () => {});
+              } else {
+                console.warn('[LinkedInAnalyzer] No posts returned or error');
+                setError('No posts with email addresses found. Make sure the posts are visible and contain email addresses.');
+                setLiveCount(0);
+              }
+              setLoadingAction('');
+            });
           });
-        });
       });
     } catch(e) {
       setError('Error stopping scrape: ' + e.message);
@@ -322,25 +385,16 @@ export default function LinkedInAnalyzer() {
     setPreviewData(null);
 
     try {
-      // Convert scraped JSON to CSV to reuse the existing backend API
-      const headers = ['Author', 'Post Text', 'Post Link', 'Email', 'Date', 'Company', 'Role'];
-      const csvRows = [];
-      csvRows.push(headers.join(','));
-      for (const row of scrapedData) {
-        const values = headers.map(header => {
-          const val = row[header] ? String(row[header]).replace(/"/g, '""') : '';
-          return `"${val}"`;
-        });
-        csvRows.push(values.join(','));
-      }
-      const csvString = csvRows.join('\n');
-      const blob = new Blob([csvString], { type: 'text/csv' });
-      const fileObj = new File([blob], 'scraped_jobs.csv', { type: 'text/csv' });
+      const fileObj = createCsvFileFromPosts(scrapedData);
 
       await linkedinAPI.analyzePosts(fileObj);
       const response = await linkedinAPI.previewDrafts({ experience_range: experienceRange });
-      setPreviewData(response.data);
-      setSuccessMessage('Preview generated successfully. Review the jobs before drafting.');
+      const nextPreviewData = normalizePreviewData(response.data);
+
+      setPreviewData(nextPreviewData);
+      setSuccessMessage(
+        `Preview generated successfully. Relevant: ${nextPreviewData.eligible_mails.length} | Excluded: ${nextPreviewData.excluded_posts.length}.`
+      );
     } catch (err) {
       showError(err, 'Failed to preview jobs');
     } finally {

@@ -35,7 +35,10 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // Don't auto-logout on 401 during the auth/login flow itself
+    const url = error.config?.url || '';
+    const isAuthEndpoint = url.includes('/auth/google/') || url.includes('/auth/me');
+    if (error.response?.status === 401 && !isAuthEndpoint) {
       // Properly logout and clear auth state to prevent redirect loop
       useAuthStore.getState().logout();
       window.location.href = '/login';

@@ -6,7 +6,7 @@
     "isEntry": true
   },
   "index.html": {
-    "file": "assets/index.html-Oln4q3Km.js",
+    "file": "assets/index.html-SPOgV5VL.js",
     "name": "index.html",
     "src": "index.html",
     "isEntry": true,
@@ -14,7 +14,7 @@
       "index.html"
     ],
     "css": [
-      "assets/index-DHmaBDSz.css"
+      "assets/index-B-x9gnwG.css"
     ]
   },
   "src/background.js": {
@@ -24,13 +24,13 @@
     "isEntry": true
   },
   "src/content.js": {
-    "file": "assets/content.js-B95i_qMS.js",
+    "file": "assets/content.js-Dr-j5B4M.js",
     "name": "content.js",
     "src": "src/content.js",
     "isEntry": true
   },
   "src/services/api.js": {
-    "file": "assets/api-_sfbm0s6.js",
+    "file": "assets/api-C0w6ps_m.js",
     "name": "api",
     "src": "src/services/api.js",
     "isDynamicEntry": true,
