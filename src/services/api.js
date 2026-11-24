@@ -21,6 +21,13 @@ function generateOAuthState() {
   return state;
 }
 
+function getGoogleRedirectUri() {
+  if (window.chrome?.identity) {
+    return window.chrome.identity.getRedirectURL();
+  }
+  return `${window.location.origin}/auth/callback`;
+}
+
 // Add Bearer token to requests (OAuth)
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('neugpt_token');
@@ -62,7 +69,7 @@ export const authAPI = {
 
     // If running in a Chrome extension, use launchWebAuthFlow
     if (window.chrome && chrome.identity) {
-      const redirectUri = chrome.identity.getRedirectURL();
+      const redirectUri = getGoogleRedirectUri();
       const params = new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
         redirect_uri: redirectUri,
@@ -91,20 +98,22 @@ export const authAPI = {
           const code = urlParams.get('code');
           const returnedState = urlParams.get('state');
 
+          if (returnedState !== state) {
+            console.error('OAuth state mismatch in Chrome extension callback');
+            localStorage.removeItem('oauth_state');
+            useAuthStore.getState().logout();
+            return;
+          }
+
           if (code) {
             // Because the frontend router isn't handling this redirect directly,
             // we manually call the token exchange here.
             useAuthStore.setState({ isLoading: true });
 
-            api.post('/auth/google/frontend-token', new URLSearchParams({
-              code,
-              state: returnedState,
-              redirect_uri: redirectUri // We must pass the exact redirect_uri we used
-            }), {
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            }).then(response => {
+            authAPI.exchangeCodeForToken(code, returnedState, redirectUri).then(response => {
               const { access_token } = response.data;
               useAuthStore.getState().setToken(access_token);
+              localStorage.removeItem('oauth_state');
               useAuthStore.getState().fetchUser();
             }).catch(err => {
               console.error('Failed to exchange code:', err);
@@ -115,9 +124,10 @@ export const authAPI = {
       );
     } else {
       // Normal web context fallback
+      const redirectUri = getGoogleRedirectUri();
       const params = new URLSearchParams({
         client_id: GOOGLE_CLIENT_ID,
-        redirect_uri: `${window.location.origin}/auth/callback`,
+        redirect_uri: redirectUri,
         response_type: 'code',
         scope: 'openid email profile https://www.googleapis.com/auth/gmail.send',
         state: state,
@@ -133,10 +143,11 @@ export const authAPI = {
    * @param {string} state - State parameter for CSRF validation
    * @returns {Promise} Token response with access_token
    */
-  exchangeCodeForToken: (code, state) => {
+  exchangeCodeForToken: (code, state, redirectUri = getGoogleRedirectUri()) => {
     return api.post('/auth/google/frontend-token', new URLSearchParams({
       code,
       state,
+      redirect_uri: redirectUri,
     }), {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
