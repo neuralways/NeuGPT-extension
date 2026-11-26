@@ -13,6 +13,7 @@ const applyThemeToDocument = (theme) => {
   const isDark = theme === 'dark';
   document.documentElement.classList.toggle('dark', isDark);
   document.body.classList.toggle('dark', isDark);
+  document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
 };
 
@@ -279,7 +280,7 @@ export const useAppStore = create((set, get) => ({
 export const useThemeStore = create(
   persist(
     (set) => ({
-      theme: 'dark',
+      theme: 'light',
       setTheme: (theme) => {
         applyThemeToDocument(theme);
         set({ theme });
@@ -294,7 +295,7 @@ export const useThemeStore = create(
     {
       name: 'neugpt-theme-storage',
       onRehydrateStorage: () => (state) => {
-        applyThemeToDocument(state?.theme || 'dark');
+        applyThemeToDocument(state?.theme || 'light');
       },
     }
   )

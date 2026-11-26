@@ -87,19 +87,31 @@ const normalizeKeyPart = (value) => String(value || '').trim().toLowerCase();
 
 const getPostIdentityKey = (post) => {
   const role = normalizeKeyPart(post.Role || post.role);
-  const postLink = normalizeKeyPart(post['Post Link']);
+  const postLink = normalizeKeyPart(post['Post Link'] || post.post_link);
 
   if (postLink && postLink !== 'n/a') {
     return `link:${postLink}||role:${role}`;
   }
 
   return [
-    `email:${normalizeKeyPart(post.Email)}`,
-    `author:${normalizeKeyPart(post.Author)}`,
-    `date:${normalizeKeyPart(post.Date)}`,
-    `text:${normalizeKeyPart(post['Post Text']).slice(0, 300)}`,
+    `email:${normalizeKeyPart(post.Email || post.email)}`,
+    `author:${normalizeKeyPart(post.Author || post.author)}`,
+    `date:${normalizeKeyPart(post.Date || post.date)}`,
+    `text:${normalizeKeyPart(post['Post Text'] || post.post_text)}`,
     `role:${role}`,
   ].join('||');
+};
+
+const getDraftSendStatus = (draft) => {
+  const status = draft.send_status || (draft.sent ? 'sent' : 'pending');
+  const statuses = {
+    pending: { label: 'Ready to send', className: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300' },
+    sending: { label: 'Sending - do not retry', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' },
+    sent: { label: 'Accepted by Gmail', className: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' },
+    failed: { label: 'Not sent - retry available', className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' },
+    unknown: { label: 'Needs confirmation - not retried', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
+  };
+  return statuses[status] || statuses.pending;
 };
 
 const createCsvFileFromPosts = (posts, fileName = 'scraped_jobs.csv') => {
@@ -139,6 +151,7 @@ export default function LinkedInAnalyzer() {
   const [role, setRole] = useState('');
   const [experienceRange, setExperienceRange] = useState('All');
   const [previewData, setPreviewData] = useState(null);
+  const [excludedPreviewPostKeys, setExcludedPreviewPostKeys] = useState([]);
   const [activePreviewTab, setActivePreviewTab] = useState('relevant');
   const [scrollSpeed, setScrollSpeed] = useState(5);
   const [liveCount, setLiveCount] = useState(0);
@@ -383,6 +396,7 @@ export default function LinkedInAnalyzer() {
     setError('');
     setSuccessMessage('');
     setPreviewData(null);
+    setExcludedPreviewPostKeys([]);
 
     try {
       const fileObj = createCsvFileFromPosts(scrapedData);
@@ -400,6 +414,22 @@ export default function LinkedInAnalyzer() {
     } finally {
       setLoadingAction('');
     }
+  };
+
+  const handleRemovePreviewPost = (post) => {
+    const key = getPostIdentityKey(post);
+    setExcludedPreviewPostKeys((current) => current.includes(key) ? current : [...current, key]);
+    setPreviewData((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        eligible_mails: current.eligible_mails.filter((item) => getPostIdentityKey(item) !== key),
+        excluded_posts: [
+          ...current.excluded_posts,
+          { ...post, excluded_reason: 'Removed by you from the preview.' },
+        ],
+      };
+    });
   };
 
   const handleDownloadCSV = () => {
@@ -441,7 +471,10 @@ export default function LinkedInAnalyzer() {
     setSuccessMessage('');
 
     try {
-      const response = await linkedinAPI.generateDrafts({ experience_range: experienceRange });
+      const response = await linkedinAPI.generateDrafts({
+        experience_range: experienceRange,
+        excluded_post_keys: excludedPreviewPostKeys,
+      });
       await fetchDrafts(false, true); // force refresh pending drafts
       
       const info = response.data?.filter_info;
@@ -450,6 +483,7 @@ export default function LinkedInAnalyzer() {
       
       setDraftStats({ generated, skipped });
       setPreviewData(null);
+      setExcludedPreviewPostKeys([]);
       setSuccessMessage(`Drafted mails are ready. Generated: ${generated} | Skipped: ${skipped}. Review them before sending.`);
     } catch (err) {
       showError(err, 'Failed to analyze CSV and draft mails');
@@ -461,16 +495,19 @@ export default function LinkedInAnalyzer() {
   const handleSendDrafts = async () => {
     setLoadingAction('send');
     const initialCount = drafts.length;
+    const sentBefore = sentDrafts.length;
     setSendingProgress({ total: initialCount, sent: 0, remaining: initialCount });
     
     // Poll backend every 2 seconds for remaining pending drafts
     const intervalId = setInterval(async () => {
       try {
-        const response = await linkedinAPI.getDrafts({ sent: false, limit: 1000 });
-        const remaining = response.data?.drafts?.length || 0;
+        const response = await linkedinAPI.getDrafts({ limit: 1000 });
+        const currentDrafts = response.data?.drafts || [];
+        const sentCount = currentDrafts.filter((draft) => draft.sent || draft.send_status === 'sent').length;
+        const remaining = currentDrafts.filter((draft) => !draft.sent && draft.send_status !== 'sent').length;
         setSendingProgress(prev => {
           if (!prev) return prev;
-          const sent = Math.max(0, initialCount - remaining);
+          const sent = Math.min(initialCount, Math.max(0, sentCount - sentBefore));
           return { ...prev, sent, remaining };
         });
       } catch (err) {
@@ -479,12 +516,11 @@ export default function LinkedInAnalyzer() {
     }, 2000);
 
     try {
-      await linkedinAPI.sendDrafts(includeResume);
-      // Clear pending cache and refresh sent cache
-      draftsCache.pendingDrafts = [];
-      await fetchDrafts(true, true); // force refresh sent drafts
-      setDrafts([]);
-      setSuccessMessage(`Sent ${initialCount} mail${initialCount === 1 ? '' : 's'} successfully.`);
+      const response = await linkedinAPI.sendDrafts(includeResume);
+      draftsCache.pendingDrafts = null;
+      draftsCache.sentDrafts = null;
+      await Promise.all([fetchDrafts(false, true), fetchDrafts(true, true)]);
+      setSuccessMessage(response.data?.message || `Gmail accepted ${response.data?.drafts_sent || 0} email(s).`);
     } catch (err) {
       showError(err, 'Failed to send mails');
     } finally {
@@ -547,11 +583,11 @@ export default function LinkedInAnalyzer() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <section className="rounded-2xl border border-blue-200 bg-blue-50 p-5 shadow-sm dark:border-blue-500/30 dark:bg-blue-500/10">
+      <section className="rounded-xl border border-slate-200 bg-white p-4 dark:border-[#2a394b] dark:bg-[#121e2c]">
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-3 rounded-xl border border-blue-200 bg-white p-4 dark:border-blue-500/30 dark:bg-blue-500/5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-blue-900 dark:text-blue-200">
-              <span className="text-base">🎯</span>
+          <div className="flex flex-col gap-3 rounded-lg border border-[#e1e7ef] bg-[#f7f8fa] p-4 dark:border-[#34465c] dark:bg-[#1a293c]">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[#183b67] dark:text-[#b9d8f6]">
+              <Linkedin className="h-4 w-4" aria-hidden="true" />
               Quick LinkedIn Search
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -560,7 +596,7 @@ export default function LinkedInAnalyzer() {
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
                 placeholder="Enter job role (e.g., Software Engineer Intern)"
-                className="flex-1 rounded-lg border border-blue-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-blue-500/30 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500"
+                className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#52769a] focus:outline-none focus:ring-2 focus:ring-[#52769a]/20 dark:border-[#40536a] dark:bg-[#0c1522] dark:text-white dark:placeholder:text-slate-500"
               />
               <button
                 onClick={handleOpenLinkedInSearch}
@@ -575,16 +611,16 @@ export default function LinkedInAnalyzer() {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
-        <div className="border-b border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
+        <div className="border-b border-slate-200 bg-[#f7f8fa] p-4 dark:border-[#2a394b] dark:bg-[#0f1a29]">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/20">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#183b67]">
                 <Linkedin className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h1 className="text-lg font-bold text-slate-950 dark:text-white">NeuGPT</h1>
+                <h1 className="text-lg font-semibold tracking-tight text-[#172338] dark:text-white">LinkedIn outreach</h1>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Automated outreach
+                  Collect hiring posts and prepare recruiter drafts
                 </p>
               </div>
             </div>
@@ -698,7 +734,7 @@ export default function LinkedInAnalyzer() {
                 <h3 className="text-lg font-semibold text-slate-950 dark:text-white">Job Relevance Preview</h3>
                 <button
                   onClick={handleDraftMails}
-                  disabled={loadingAction === 'draft'}
+                  disabled={loadingAction === 'draft' || !previewData.eligible_mails?.length}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-green-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-green-600/20 transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {loadingAction === 'draft' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
@@ -725,9 +761,20 @@ export default function LinkedInAnalyzer() {
                 {activePreviewTab === 'relevant' && (
                    previewData.eligible_mails?.length === 0 ? <p className="text-slate-500 text-sm py-4">No relevant jobs found for this criteria.</p> :
                    previewData.eligible_mails.map((post, i) => (
-                     <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-lg dark:bg-slate-900/50 dark:border-slate-700">
-                       <p className="font-medium text-slate-900 dark:text-white text-sm">{getRoleDisplay(post)}</p>
-                       <p className="text-xs text-slate-500">{getCompanyDisplay(post)} • {post.Email}</p>
+                     <div key={getPostIdentityKey(post) || i} className="flex items-start justify-between gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg dark:bg-slate-900/50 dark:border-slate-700">
+                       <div className="min-w-0">
+                         <p className="font-medium text-slate-900 dark:text-white text-sm">{getRoleDisplay(post)}</p>
+                         <p className="text-xs text-slate-500">{getCompanyDisplay(post)} • {post.Email}</p>
+                       </div>
+                       <button
+                         type="button"
+                         onClick={() => handleRemovePreviewPost(post)}
+                         className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm hover:bg-red-50 dark:border-red-500/30 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-500/10"
+                         aria-label={`Delete ${getRoleDisplay(post)} from job preview`}
+                       >
+                         <Trash2 className="h-3.5 w-3.5" />
+                         Delete job
+                       </button>
                      </div>
                    ))
                 )}
@@ -869,7 +916,7 @@ export default function LinkedInAnalyzer() {
                   </span>
                 </div>
               )}
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Open each mail before sending it to the recipient.</p>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Open each mail before sending. Sent means Gmail accepted it, not confirmed inbox delivery.</p>
             </div>
               <div className="flex flex-col items-end gap-2">
                 <div className="flex items-center gap-3">
@@ -919,6 +966,8 @@ export default function LinkedInAnalyzer() {
           <div className="space-y-3">
             {drafts.map((draft, index) => {
               const isExpanded = expandedDrafts.has(index);
+              const sendStatus = getDraftSendStatus(draft);
+              const isSendLocked = ['sending', 'unknown', 'sent'].includes(draft.send_status || (draft.sent ? 'sent' : 'pending'));
               return (
                 <article key={draft.id || index} className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
                   <button
@@ -932,6 +981,7 @@ export default function LinkedInAnalyzer() {
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-slate-950 dark:text-white">{draft.subject || `Draft ${index + 1}`}</p>
                         <p className="truncate text-sm text-slate-500 dark:text-slate-400">To: {getRecipient(draft)}</p>
+                        <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${sendStatus.className}`}>{sendStatus.label}</span>
                       </div>
                     </div>
                     {isExpanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
@@ -982,20 +1032,24 @@ export default function LinkedInAnalyzer() {
                           <div>
                             <div className="flex items-center justify-between mb-2">
                               <p className="text-xs font-semibold uppercase text-slate-500">Subject</p>
-                              <button
-                                onClick={() => handleEditClick(draft)}
-                                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
-                              >
-                                <Edit2 className="h-3.5 w-3.5" />
-                                Edit Draft
-                              </button>
-                              <button
-                                onClick={() => handleDeleteDraft(draft.id)}
-                                className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Delete
-                              </button>
+                              {!isSendLocked && (
+                                <>
+                                  <button
+                                    onClick={() => handleEditClick(draft)}
+                                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
+                                  >
+                                    <Edit2 className="h-3.5 w-3.5" />
+                                    Edit Draft
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteDraft(draft.id)}
+                                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Delete
+                                  </button>
+                                </>
+                              )}
                             </div>
                             <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
                               {draft.subject || 'No subject'}
@@ -1009,6 +1063,11 @@ export default function LinkedInAnalyzer() {
                               className="min-h-[220px] w-full resize-y rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-800 outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                             />
                           </div>
+                          {draft.send_error && (
+                            <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                              Send status details: {draft.send_error}
+                            </p>
+                          )}
                         </>
                       )}
                     </div>
@@ -1025,7 +1084,7 @@ export default function LinkedInAnalyzer() {
           <Clock className="h-5 w-5 text-blue-600 dark:text-blue-300" />
           <div>
             <h2 className="text-xl font-semibold text-slate-950 dark:text-white">Last Sent Mails</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Date-wise history from sent LinkedIn drafts.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Gmail acceptance history; this does not confirm inbox delivery.</p>
           </div>
         </div>
 
@@ -1039,7 +1098,8 @@ export default function LinkedInAnalyzer() {
                     <div key={mail.id || index} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-900">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">{mail.subject || `Sent mail ${index + 1}`}</p>
-                        <p className="truncate text-xs text-slate-500">To: {getRecipient(mail)}</p>
+                        <p className="truncate text-xs text-slate-500">To: {getRecipient(mail)} - Accepted by Gmail</p>
+                        {mail.message_id && <p className="truncate text-[11px] text-slate-400">Message ID: {mail.message_id}</p>}
                       </div>
                       <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
                     </div>

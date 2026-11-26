@@ -47,6 +47,11 @@ export default function Profile() {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
+    phone_number: '',
+    linkedin_url: '',
+    github_url: '',
+    portfolio_url: '',
+    email_signature: '',
     skills: '',
     interested_roles: '',
     remote_working_preference: '',
@@ -101,6 +106,11 @@ export default function Profile() {
     setFormData({
       name: profile?.name || user?.name || '',
       email: profile?.email || user?.email || '',
+      phone_number: profile?.phone_number || '',
+      linkedin_url: profile?.linkedin_url || '',
+      github_url: profile?.github_url || '',
+      portfolio_url: profile?.portfolio_url || '',
+      email_signature: profile?.email_signature || '',
       skills: listToText(profile?.skills),
       interested_roles: listToText(profile?.interested_roles),
       remote_working_preference: profile?.remote_working_preference || '',
@@ -128,6 +138,11 @@ export default function Profile() {
       await updateProfile({
         name: formData.name,
         email: formData.email,
+        phone_number: formData.phone_number,
+        linkedin_url: formData.linkedin_url,
+        github_url: formData.github_url,
+        portfolio_url: formData.portfolio_url,
+        email_signature: formData.email_signature,
         skills: textToList(formData.skills),
         interested_roles: textToList(formData.interested_roles),
         remote_working_preference: formData.remote_working_preference,
@@ -176,6 +191,10 @@ export default function Profile() {
   const fields = [
     ['name', 'Full name', 'text'],
     ['email', 'Email', 'email'],
+    ['phone_number', 'Mobile number', 'tel'],
+    ['linkedin_url', 'LinkedIn profile URL', 'url'],
+    ['github_url', 'GitHub profile URL', 'url'],
+    ['portfolio_url', 'Portfolio / personal website', 'url'],
     ['skills', 'Skills', 'text'],
     ['interested_roles', 'Interested roles', 'text'],
     ['remote_working_preference', 'Remote preference', 'text'],
@@ -257,7 +276,10 @@ export default function Profile() {
 
       {editMode && (
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-          <h2 className="mb-4 text-lg font-semibold text-slate-950 dark:text-white">Backend Profile Fields</h2>
+          <h2 className="mb-1 text-lg font-semibold text-slate-950 dark:text-white">Profile & email context</h2>
+          <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+            These details help personalize drafts. Your contact links are not added to a mail unless you include them in your signature.
+          </p>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {fields.map(([name, label, type]) => (
               <label key={name} className="block">
@@ -280,6 +302,21 @@ export default function Profile() {
                 rows={4}
                 className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none focus:border-primary-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
               />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-2 block text-sm font-medium text-slate-600 dark:text-slate-300">Signature to show after “Thank you,”</span>
+              <textarea
+                name="email_signature"
+                value={formData.email_signature}
+                onChange={handleInputChange}
+                rows={3}
+                maxLength={500}
+                placeholder={'Your name\nPhone or portfolio link (optional)'}
+                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-950 outline-none focus:border-primary-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+              />
+              <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                Leave blank to use the generated professional sign-off. Line breaks are preserved.
+              </span>
             </label>
             <div className="block md:col-span-2 mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
               <h3 className="mb-4 flex items-center gap-2 text-md font-semibold text-slate-950 dark:text-white">

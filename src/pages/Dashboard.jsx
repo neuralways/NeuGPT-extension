@@ -1,17 +1,35 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, BarChart3, Brain, Linkedin, Mail, Youtube, Zap, Crown, CreditCard, Users, Plus, Edit2, Trash2, Loader2 } from 'lucide-react';
-import { historyAPI, linkedinAPI, subscriptionAPI } from '../services/api';
-import { useAppStore, useAuthStore } from '../stores/useStore';
+import { ArrowRight, Linkedin, Mail } from 'lucide-react';
+import { historyAPI } from '../services/api';
+import { useAuthStore, useAppStore } from '../stores/useStore';
+
+const activityItems = [
+  {
+    key: 'linkedin_searches',
+    label: 'LinkedIn analyses',
+    icon: Linkedin,
+    tone: 'bg-[#edf3f8] text-[#356797] dark:bg-sky-500/10 dark:text-sky-300',
+    fallbackValue: '10+',
+  },
+  {
+    key: 'emails_sent',
+    label: 'Emails sent',
+    icon: Mail,
+    tone: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
+    fallbackValue: '250+',
+  },
+];
 
 export default function Dashboard() {
-  const { user, profile, fetchUser, fetchProfile, isAuthenticated, isAdmin } = useAuthStore();
-  const { stats, setStats } = useAppStore();
-  const [loading, setLoading] = useState(true);
+  const { user, profile, fetchUser, fetchProfile, isAuthenticated } = useAuthStore();
+  const { setStats } = useAppStore();
+  const [activity, setActivity] = useState(null);
+  const [activityStatus, setActivityStatus] = useState('loading');
 
-  const userId = user?.email;
   const userEmail = user?.email || profile?.email;
-  const isUserAdmin = isAdmin();
+  const displayName = user?.name || profile?.name;
+  const firstName = displayName?.split(' ')[0] || userEmail?.split('@')[0] || 'there';
 
   useEffect(() => {
     if (isAuthenticated && !user) fetchUser();
@@ -19,188 +37,135 @@ export default function Dashboard() {
   }, [fetchProfile, fetchUser, isAuthenticated, profile, user]);
 
   useEffect(() => {
-    const loadDashboard = async () => {
-      setLoading(true);
+    if (!isAuthenticated || !userEmail) {
+      setActivity(null);
+      setActivityStatus('loading');
+      return undefined;
+    }
+
+    let active = true;
+    setActivity(null);
+    setActivityStatus('loading');
+
+    const loadActivity = async () => {
       try {
-        if (!userId) {
-          setLoading(false);
-          return;
+        const response = await historyAPI.getStats(userEmail);
+        const data = response.data;
+
+        if (
+          !data ||
+          !Number.isFinite(data.linkedin_searches) ||
+          !Number.isFinite(data.emails_sent)
+        ) {
+          throw new Error('Activity statistics were incomplete.');
         }
 
-        const response = await historyAPI.getStats(userId);
-        setStats(response.data);
-      } catch (error) {
-        console.error('Failed to fetch stats:', error);
-      } finally {
-        setLoading(false);
+        if (active) {
+          setActivity(data);
+          setStats(data);
+          setActivityStatus('ready');
+        }
+      } catch {
+        if (active) setActivityStatus('fallback');
       }
     };
 
-    if (!userId && !userEmail) {
-      setLoading(false);
-      return;
-    }
-
-    loadDashboard();
-  }, [setStats, userEmail, userId]);
-
-  const values = useMemo(() => {
-    const youtube = stats?.youtube_analyses || 0;
-    const linkedin = stats?.linkedin_searches || 0;
-    const sent = stats?.emails_sent || 0;
-    return {
-      youtube,
-      linkedin,
-      sent,
-      total: youtube + linkedin,
+    loadActivity();
+    return () => {
+      active = false;
     };
-  }, [stats]);
-
-  const statCards = [
-    {
-      title: 'YouTube Analyses',
-      value: values.youtube,
-      icon: Youtube,
-      color: 'text-red-500',
-      bgColor: 'bg-red-50 dark:bg-red-500/10',
-      path: '/youtube',
-    },
-    {
-      title: 'LinkedIn Analyses',
-      value: values.linkedin,
-      icon: Linkedin,
-      color: 'text-blue-500',
-      bgColor: 'bg-blue-50 dark:bg-blue-500/10',
-      path: '/linkedin',
-    },
-    {
-      title: 'Emails Sent',
-      value: values.sent,
-      icon: Mail,
-      color: 'text-green-500',
-      bgColor: 'bg-green-50 dark:bg-green-500/10',
-      path: '/linkedin',
-    },
-    {
-      title: 'Total Searches',
-      value: values.total,
-      icon: BarChart3,
-      color: 'text-violet-500',
-      bgColor: 'bg-violet-50 dark:bg-violet-500/10',
-      path: '/history',
-    },
-  ];
-
-  const quickActions = [
-    {
-      title: 'LinkedIn Outreach',
-      description: 'Upload CSV, draft mails, review, and send',
-      icon: Linkedin,
-      path: '/linkedin',
-    },
-    {
-      title: 'YouTube Analysis',
-      description: 'Analyze comments, sentiment, and transcripts',
-      icon: Youtube,
-      path: '/youtube',
-    },
-  ];
+  }, [isAuthenticated, setStats, userEmail]);
 
   return (
-    <div className="space-y-8">
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-950 dark:text-white">
-              Welcome back, {user?.name?.split(' ')[0] || user?.email?.split('@')[0] || 'User'}
-            </h1>
-            <p className="mt-1 text-slate-500 dark:text-slate-400">
-              Your analysis and outreach activity is shown from backend history endpoints.
+    <div className="mx-auto max-w-5xl space-y-8">
+      <header>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#52769a] dark:text-sky-300">
+          Dashboard
+        </p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[#172338] dark:text-white sm:text-[38px]">
+          Welcome back, {firstName}.
+        </h1>
+      </header>
+
+      <section
+        aria-labelledby="outreach-heading"
+        className="rounded-2xl bg-[#183b67] p-6 text-white sm:p-8"
+      >
+        <div className="flex items-start justify-between gap-6">
+          <div className="max-w-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-100">
+              LinkedIn outreach
             </p>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2 dark:border-primary-500/30 dark:bg-primary-500/10">
-            <Zap className="h-5 w-5 text-primary-500" />
-            <span className="font-medium text-primary-700 dark:text-primary-300">AI Powered</span>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {statCards.map((stat) => (
-          <Link
-            key={stat.title}
-            to={stat.path}
-            className="group rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-slate-600"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="mb-1 text-sm text-slate-500 dark:text-slate-400">{stat.title}</p>
-                <p className="text-3xl font-bold text-slate-950 dark:text-white">
-                  {loading ? <span className="animate-pulse">...</span> : stat.value}
-                </p>
-              </div>
-              <div className={`rounded-lg p-3 ${stat.bgColor}`}>
-                <stat.icon className={`h-6 w-6 ${stat.color}`} />
-              </div>
-            </div>
-            <div className="mt-4 flex items-center text-sm text-slate-500 transition-colors group-hover:text-slate-950 dark:text-slate-400 dark:group-hover:text-white">
-              <span>View details</span>
-              <ArrowRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" />
-            </div>
-          </Link>
-        ))}
-      </section>
-
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-slate-950 dark:text-white">
-          <Zap className="h-5 w-5 text-primary-500" />
-          Quick Actions
-        </h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {quickActions.map((action) => (
-            <Link
-              key={action.title}
-              to={action.path}
-              className="group rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary-300 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-primary-500/50"
+            <h2
+              id="outreach-heading"
+              className="mt-3 max-w-2xl text-2xl font-semibold leading-tight tracking-[-0.03em] sm:text-3xl"
             >
-              <div className="flex items-center gap-4">
-                <div className="rounded-lg bg-primary-50 p-3 dark:bg-primary-500/10">
-                  <action.icon className="h-6 w-6 text-primary-600 dark:text-primary-300" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-slate-950 transition-colors group-hover:text-primary-600 dark:text-white dark:group-hover:text-primary-300">
-                    {action.title}
-                  </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{action.description}</p>
-                </div>
-              </div>
+              Turn hiring posts into thoughtful first emails.
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-blue-100">
+              Collect relevant LinkedIn posts, draft recruiter emails, and review each message before sending.
+            </p>
+            <Link
+              to="/linkedin"
+              className="mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-white px-4 text-sm font-semibold text-[#183b67] transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-white/70 focus:ring-offset-2 focus:ring-offset-[#183b67]"
+            >
+              Open LinkedIn workspace <ArrowRight className="h-4 w-4" />
             </Link>
-          ))}
+          </div>
+          <span className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white/10 sm:flex">
+            <Linkedin className="h-7 w-7" aria-hidden="true" />
+          </span>
         </div>
       </section>
 
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-slate-950 dark:text-white">
-          <Brain className="h-5 w-5 text-primary-500" />
-          Platform Features
-        </h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h3 className="mb-3 font-semibold text-slate-950 dark:text-white">YouTube</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Sentiment analysis, comments, transcripts, and video download tools.
-            </p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-            <h3 className="mb-3 font-semibold text-slate-950 dark:text-white">LinkedIn</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              CSV upload, AI draft generation, review, sending, and sent-mail history.
-            </p>
-          </div>
+      <section aria-labelledby="activity-heading">
+        <div className="mb-4">
+          <h2
+            id="activity-heading"
+            className="text-lg font-semibold tracking-[-0.02em] text-[#172338] dark:text-white"
+          >
+            Your activity
+          </h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {activityStatus === 'fallback'
+              ? 'Example figures · account activity unavailable'
+              : 'All time'}
+          </p>
+        </div>
+
+        <div
+          aria-busy={activityStatus === 'loading'}
+          className="grid gap-4 sm:grid-cols-2"
+        >
+          {activityItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <article
+                key={item.key}
+                className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 dark:border-[#2a394b] dark:bg-[#121e2c]"
+              >
+                <div>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">
+                    {item.label}
+                  </p>
+                  <p className="mt-2 text-3xl font-semibold tracking-tight text-[#172338] dark:text-white">
+                    {activityStatus === 'loading' ? (
+                      <span className="block h-9 w-12 animate-pulse rounded bg-slate-200 dark:bg-[#34465c]" />
+                    ) : activityStatus === 'ready' ? (
+                      activity[item.key].toLocaleString()
+                    ) : (
+                      item.fallbackValue
+                    )}
+                  </p>
+                </div>
+                <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${item.tone}`}>
+                  <Icon className="h-5 w-5" aria-hidden="true" />
+                </span>
+              </article>
+            );
+          })}
         </div>
       </section>
-
-
     </div>
   );
 }
