@@ -1,0 +1,1 @@
+import{r as e}from"./index.html-QjrygrHY.js";export{e as historyAPI};

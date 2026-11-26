@@ -6,7 +6,7 @@
     "isEntry": true
   },
   "index.html": {
-    "file": "assets/index.html-B6qNDUeo.js",
+    "file": "assets/index.html-QjrygrHY.js",
     "name": "index.html",
     "src": "index.html",
     "isEntry": true,
@@ -14,7 +14,7 @@
       "index.html"
     ],
     "css": [
-      "assets/index-B-x9gnwG.css"
+      "assets/index-EDSBf4d6.css"
     ]
   },
   "src/background.js": {
@@ -30,7 +30,7 @@
     "isEntry": true
   },
   "src/services/api.js": {
-    "file": "assets/api-CXeQUaLr.js",
+    "file": "assets/api-BDmDOyL2.js",
     "name": "api",
     "src": "src/services/api.js",
     "isDynamicEntry": true,
